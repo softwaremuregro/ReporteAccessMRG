@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reporte de Visitantes del AccessMRG</title>
+  <link href="css/bootstrap.min.css" rel="stylesheet" />
+  <meta name="theme-color" content="#000000" />
+  <style>
+    body {
+      background-color: #f4f7f6;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .navbar {
+      background: #611232;
+      border-bottom: 2px solid #e9ecef;
+      padding: 5px 0;
+    }
+
+    .logo-nav {
+      height: 50px;
+      cursor: pointer;
+    }
+
+    #admin-panel {
+      width: 100%;
+      height: 100%;
+      background: white;
+      z-index: 2000;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .section {
+      padding: 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="row">
+    <nav class="navbar sticky-top">
+      <div class="container d-flex justify-content-between align-items-center">
+        <img src="iconos/secretaria.png" class="logo-nav" />
+        <img src="iconos/mrg3.png" class="logo-nav" />
+        <img src="iconos/inah.png" class="logo-nav" />
+      </div>
+    </nav>
+  </div>
+
+  <div id="admin-panel" class="section">
+    <div class="container">
+      <h2 class="border-bottom pb-3 mb-4">Reporte de Visitantes</h2>
+
+      <div class="row mb-4 bg-light p-3 rounded">
+        <div class="col-md-4">
+          <label class="form-label fw-bold">Año:</label>
+          <select id="filter-year" class="form-select"></select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-bold">Mes:</label>
+          <select id="filter-month" class="form-select"></select>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button id="btn-generar-reporte" class="btn btn-danger w-100">
+            Ver y Generar Reporte en PDF con Gráficas
+          </button>
+        </div>
+      </div>
+
+      <div id="reporte-content"></div>
+
+      <div class="row mt-4">
+        <div class="col-md-6" style="position: relative; height:300px;">
+          <canvas id="graficaTabla"></canvas>
+        </div>
+        <div class="col-md-6" style="position: relative; height:300px;">
+          <canvas id="graficaGenero"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Imagen banner oculta -->
+  <img id="banner" src="iconos/banner.png" style="display:none;" />
+
+  <!-- Librerías -->
+  <script src="js/jquery-3.6.0.min.js"></script>
+  <script src="js/bootstrap.bundle.min.js"></script>
+  <script src="js/jspdf.umd.min.js"></script>
+  <script src="js/jspdf.plugin.autotable.min.js"></script>
+  <script src="js/firebase-app.js"></script>
+  <script src="js/firebase-firestore.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  <script type="module">
+    const firebaseConfig = {
+      apiKey: "AIzaSyDfHasUn9olSiAe59At2XcZFnyYMvGJm2U",
+      authDomain: "appvisitantes-c3b62.firebaseapp.com",
+      projectId: "appvisitantes-c3b62",
+      storageBucket: "appvisitantes-c3b62.firebasestorage.app",
+      messagingSenderId: "924367990190",
+      appId: "1:924367990190:web:48d333388355359e5cac3f",
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    var db = firebase.firestore();
+
+    await cargarFiltros();
+    async function cargarFiltros() {
+      const snap = await db.collection("visitas_detalladas").get();
+      let anios = new Set();
+      let meses = new Set();
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.anio) anios.add(d.anio);
+        if (d.mes) meses.add(d.mes);
+      });
+      $("#filter-year").empty();
+      anios.forEach((a) => $("#filter-year").append(`<option value="${a}">${a}</option>`));
+      $("#filter-month, #filter-month-compare").empty();
+      meses.forEach((m) => {
+        $("#filter-month").append(`<option value="${m}">${m.toUpperCase()}</option>`);
+        $("#filter-month-compare").append(`<option value="${m}">${m.toUpperCase()}</option>`);
+      });
+    }
+
+    // Generar PDF
+    $("#btn-generar-reporte").click(async function () {
+      const selYear = $("#filter-year").val();
+      const selMonth = $("#filter-month").val();
+      const snap = await db.collection("visitas_detalladas").get();
+      const snap2 = await db.collection("visitas_guiadas").get();
+      let counts = {};
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.anio === selYear && d.mes === selMonth) {
+          const clave = `${d.grupo_social}`;
+          if (clave != "undefined")
+            counts[clave] = (counts[clave] || 0) + 1;
+        }
+      });
+      snap2.forEach((doc) => {
+        const d = doc.data();
+        if (d.anio === selYear && d.mes === selMonth) {
+          counts["infancias_adolescentes"] = (counts["infancias_adolescentes"] || 0) + d.infancias_adolescentes_total;
+          counts["personas_jovenes"] = (counts["personas_jovenes"] || 0) + d.jovenes_total;
+          counts["adultosmayores"] = (counts["adultosmayores"] || 0) + d.adultos_mayores_total;
+        }
+      })
+      let html = `<h1>Museo Regional de Guerrero</h1><h2>Estadística mensual de visitantes</h2><h3 id="fechareporte">Mes de ${selMonth} de ${selYear}</h3><table id="tabla-reporte" class="table table-bordered table-striped mt-3">
+                        <thead class="table-dark"><tr><th>Grupo</th><th>Total</th></tr></thead><tbody>`;
+      for (const k in counts) {
+        html += `<tr><td>${k}</td><td>${counts[k]}</td></tr>`;
+      }
+      $("#reporte-content").html(
+        Object.keys(counts).length ?
+          html + "</tbody></table>" :
+          '<div class="alert alert-info">No se encontraron registros.</div>',
+      );
+      let countsMes = {};
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.anio === selYear && d.mes === selMonth) {
+          countsMes[d.grupo_social] = (countsMes[d.grupo_social] || 0) + 1;
+        }
+      });
+
+      // ==========================================
+      // LÍNEAS DE LIMPIEZA (DESTRUIR GRÁFICAS PREVIAS)
+      // ==========================================
+      const chartExistenteTabla = Chart.getChart("graficaTabla");
+      if (chartExistenteTabla) { chartExistenteTabla.destroy(); }
+
+      const chartExistenteGenero = Chart.getChart("graficaGenero");
+      if (chartExistenteGenero) { chartExistenteGenero.destroy(); }
+      // ==========================================
+      // Gráfica de barras (tabla completa)
+      new Chart(document.getElementById("graficaTabla"), {
+        type: "bar",
+        data: {
+          labels: Object.keys(countsMes),
+          datasets: [{
+            label: `Visitantes ${selMonth} ${selYear}`,
+            data: Object.values(countsMes),
+            backgroundColor: "rgba(97, 18, 50, 0.7)"
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false
+        }
+      });
+
+      // Gráfica de pastel (hombres vs mujeres)
+      new Chart(document.getElementById("graficaGenero"), {
+        type: "pie",
+        data: {
+          labels: ["Hombres", "Mujeres"],
+          datasets: [{
+            data: [countsMes["hombres"] || 0, countsMes["mujeres"] || 0],
+            backgroundColor: ["#36A2EB", "#FF6384"]
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { datalabels: { color: '#fff', font: { weight: 'bold' }, formatter: (value, ctx) => { let sum = 0; let dataArr = ctx.chart.data.datasets[0].data; dataArr.map(data => { sum += data; }); let percentage = (value * 100 / sum).toFixed(2) + "%"; return percentage; } } } },
+        plugins: [ChartDataLabels]
+      });
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      // 1. Agregar Banner y Textos Principales
+      const img = document.getElementById("banner");
+      if (img) {
+        doc.addImage(img, "PNG", 14, 10, 180, 10);
+      }
+
+      doc.setFontSize(18);
+      doc.text("Museo Regional de Guerrero", 14, 30);
+      doc.setFontSize(14);
+      doc.text("Estadística mensual de visitantes", 14, 40);
+      doc.setFontSize(12);
+      doc.text($("#fechareporte").text(), 14, 50);
+
+      // 2. Renderizar la tabla de datos
+      doc.autoTable({
+        html: "#tabla-reporte",
+        startY: 60
+      });
+
+      // Obtener la posición donde terminó la tabla para saber dónde pintar las gráficas
+      let finalY = doc.lastAutoTable.finalY + 15;
+
+      // 3. OBTENER E INSERTAR LAS GRÁFICAS DE CHART.JS
+      const canvasTabla = document.getElementById("graficaTabla");
+      const canvasGenero = document.getElementById("graficaGenero");
+
+      // Verificar espacio restante en la página actual. Si queda poco, añadimos una página nueva.
+      if (finalY > 180) {
+        doc.addPage();
+        finalY = 20; // Reiniciar margen superior en la nueva página
+      }
+
+      // Insertar Gráfica de Barras (Tabla Completa)
+      if (canvasTabla) {
+        // Convertir canvas a imagen Base64 (PNG)
+        const imgGraficaTabla = canvasTabla.toDataURL("image/png");
+        doc.setFontSize(14);
+        doc.text("Distribución por Grupo Social", 14, finalY);
+        // Añadir imagen al PDF: doc.addImage(imgData, format, x, y, width, height)
+        doc.addImage(imgGraficaTabla, "PNG", 14, finalY + 5, 180, 80);
+        finalY += 95; // Desplazar hacia abajo el puntero Y para la siguiente gráfica
+      }
+
+      // Verificar espacio de nuevo antes de la segunda gráfica
+      if (finalY > 200) {
+        doc.addPage();
+        finalY = 20;
+      }
+
+      // Insertar Gráfica de Pastel (Género)
+      if (canvasGenero) {
+        console.log("Canvas de género encontrado, generando imagen para PDF...");
+        const imgGraficaGenero = canvasGenero.toDataURL("image/png");
+        doc.setFontSize(14);
+        doc.text("Distribución por Género", 14, finalY);
+        // Se ajustan las dimensiones (por ser gráfica de pastel, una proporción más cuadrada o centrada le va mejor)
+        doc.addImage(imgGraficaGenero, "PNG", 60, finalY + 5,120, 80);
+      }
+
+      // 4. Guardar documento
+      doc.save(`Reporte_Visitantes_${selMonth}_${selYear}.pdf`);
+
+    });
+
+  </script>
+</body>
+
+</html>
